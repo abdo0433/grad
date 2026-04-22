@@ -5,16 +5,16 @@ services:
   # ─────────────────────────────────────────
   # MongoDB
   # ─────────────────────────────────────────
-  mongo:
-    image: mongo:7
-    container_name: gradproject_mongo
-    restart: unless-stopped
-    volumes:
-      - mongo_data:/data/db
-    ports:
-      - "27017:27017" # احذف السطر ده في Production
-    networks:
-      - app_network
+  # mongo:
+  #   image: mongo:7
+  #   container_name: gradproject_mongo
+  #   restart: unless-stopped
+  #   volumes:
+  #     - mongo_data:/data/db
+  #   ports:
+  #     - "27017:27017" # احذف السطر ده في Production
+  #   networks:
+  #     - app_network
 
   # ─────────────────────────────────────────
   # Node.js Backend
@@ -36,8 +36,6 @@ services:
       EMAIL_PASS: ${EMAIL_PASS}
     volumes:
       - uploads_data:/app/uploads # عشان الملفات المرفوعة متتمسحش
-    depends_on:
-      - mongo
     networks:
       - app_network
 
