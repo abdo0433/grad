@@ -1,0 +1,294 @@
+// interview.js
+const express = require('express');
+const router  = express.Router();
+const multer  = require('multer');
+const fs      = require('fs');
+const { v4: uuidv4 } = require('uuid');
+
+const { startPythonSession, getNextQuestion, sendFrame, getVideoAnalysis, isPythonAlive } = require('../services/pythonService');
+const { submitAudioAnswer, getFinalFeedback } = require('../services/interviewService');
+
+// ============================================================
+// Multer Setup
+// ============================================================
+const uploadCV = multer({
+  dest: 'uploads/',
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    file.mimetype === 'application/pdf'
+      ? cb(null, true)
+      : cb(new Error('Only PDF files are allowed'), false);
+  },
+});
+
+const uploadAudio = multer({
+  dest: 'uploads/',
+  limits: { fileSize: 50 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    const allowed = ['audio/wav', 'audio/x-wav', 'audio/wave'];
+    allowed.includes(file.mimetype)
+      ? cb(null, true)
+      : cb(new Error('Only .wav audio files are accepted'), false);
+  },
+});
+
+// ============================================================
+// In-memory Sessions
+// ============================================================
+const sessions = new Map();
+
+function cleanup(file) {
+  if (file && fs.existsSync(file.path)) fs.unlinkSync(file.path);
+}
+
+// ============================================================
+// START INTERVIEW
+// ============================================================
+router.post('/session/start-with-cv', uploadCV.single('cv'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ success: false, message: 'CV PDF file is required' });
+    }
+
+    const { job_title, job_description } = req.body;
+
+    if (!job_title?.trim() || !job_description?.trim()) {
+      cleanup(req.file);
+      return res.status(400).json({ success: false, message: 'job_title and job_description are required' });
+    }
+
+    const cvBuffer   = fs.readFileSync(req.file.path);
+    const cvFileName = req.file.originalname || 'cv.pdf';
+    cleanup(req.file);
+
+    const startRes = await startPythonSession(job_title, job_description, cvBuffer, cvFileName);
+
+    if (!startRes || !startRes.session_id) {
+      return res.status(500).json({ success: false, message: 'AI service unavailable' });
+    }
+
+    const pythonSessionId = startRes.session_id;
+    const questionRes = await getNextQuestion(pythonSessionId);
+
+    if (!questionRes) {
+      return res.status(500).json({ success: false, message: 'Failed to get first question' });
+    }
+
+    const nodeSessionId = uuidv4();
+
+    sessions.set(nodeSessionId, {
+      python_session_id:       pythonSessionId,
+      status:                  'active',
+      current_question:        questionRes.question,
+      current_question_audio:  questionRes.question_audio || null,
+      current_stage:           questionRes.stage,
+      current_question_number: questionRes.question_number,
+      current_total_questions: questionRes.total_questions,
+      created_at:              new Date().toISOString(),
+    });
+
+    return res.status(201).json({
+      success:              true,
+      session_id:           nodeSessionId,
+      first_question:       questionRes.question,
+      first_question_audio: questionRes.question_audio || null,
+      stage:                questionRes.stage,
+      question_number:      questionRes.question_number,
+      total_questions:      questionRes.total_questions,
+      cv_parsed:            startRes.cv_parsed || false,
+      message:              'Interview started successfully',
+    });
+
+  } catch (err) {
+    console.error('Start session error:', err);
+    cleanup(req.file);
+    return res.status(500).json({ success: false, message: 'Error starting interview' });
+  }
+});
+
+// ============================================================
+// GET CURRENT QUESTION
+// ============================================================
+router.get('/session/:session_id/question', (req, res) => {
+  try {
+    const { session_id } = req.params;
+    const session = sessions.get(session_id);
+
+    if (!session) {
+      return res.status(404).json({ success: false, message: 'Session not found' });
+    }
+
+    return res.json({
+      success:         true,
+      question:        session.current_question,
+      question_audio:  session.current_question_audio,
+      stage:           session.current_stage,
+      question_number: session.current_question_number,
+      total_questions: session.current_total_questions,
+    });
+
+  } catch (err) {
+    console.error('Get question error:', err);
+    return res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// ============================================================
+// SEND CAMERA FRAME
+// ============================================================
+// POST /session/:session_id/frame
+// POST /session/:session_id/frame
+router.post('/session/:session_id/frame', async (req, res) => {
+  try {
+    const { session_id } = req.params;
+    const { frame_base64 } = req.body;
+
+    if (!sessions.has(session_id)) {
+      return res.status(404).json({ success: false, message: 'Session not found' });
+    }
+
+    if (!frame_base64 || typeof frame_base64 !== 'string') {
+      return res.status(400).json({ success: false, message: 'frame_base64 is required and must be a string' });
+    }
+
+    const { python_session_id } = sessions.get(session_id);
+
+    const result = await sendFrame(python_session_id, frame_base64);
+
+    return res.json({
+      success: true,
+      buffered_frames: result?.buffered_frames || 0,
+    });
+
+  } catch (err) {
+    console.error('Frame endpoint error:', err);
+    return res.status(500).json({ success: false, message: 'Failed to send frame' });
+  }
+});
+//====================================
+// SUBMIT AUDIO ANSWER  ← التعديل الأساسي هنا
+// ============================================================
+router.post('/session/:session_id/answer', uploadAudio.single('audio'), async (req, res) => {
+  try {
+    const { session_id } = req.params;
+
+    if (!sessions.has(session_id)) {
+      cleanup(req.file);
+      return res.status(404).json({ success: false, message: 'Session not found' });
+    }
+
+    if (!req.file) {
+      return res.status(400).json({ success: false, message: 'Audio file (.wav) is required' });
+    }
+
+    const session = sessions.get(session_id);
+
+    if (session.status === 'completed') {
+      cleanup(req.file);
+      return res.status(400).json({ success: false, message: 'Interview already completed' });
+    }
+
+    const { python_session_id } = session;
+
+    // جلب تحليل الفيديو إذا وجد
+    const videoResult = await getVideoAnalysis(python_session_id);
+    const videoFeatures = videoResult?.has_data ? videoResult.features : null;
+
+    // معالجة الإجابة الصوتية + جلب السؤال التالي
+    const result = await submitAudioAnswer(python_session_id, req.file, videoFeatures);
+    cleanup(req.file);
+
+    if (!result) {
+      return res.status(500).json({ success: false, message: 'AI service unavailable' });
+    }
+
+    if (!result.success) {
+      return res.status(400).json(result);
+    }
+
+    // حفظ السؤال الجديد في الـ session
+    if (result.next_question) {
+      session.current_question        = result.next_question;
+      session.current_question_audio  = result.next_question_audio || null;
+      session.current_stage           = result.stage;
+      session.current_question_number = result.question_number;
+      session.current_total_questions = result.total_questions;
+    }
+
+    if (result.interview_complete) {
+      session.status = 'completed';
+      session.current_question = null;
+      session.current_question_audio = null;
+    }
+
+    // الـ Response النهائي المعدل (هذا هو المهم للـ Flutter)
+    return res.json({
+      success:             true,
+      transcribed_answer:  result.transcribed_answer,
+      next_question:       result.next_question,
+      next_question_audio: result.next_question_audio,
+      stage:               result.stage,
+      question_number:     result.question_number,
+      total_questions:     result.total_questions,
+      stage_complete:      result.stage_complete,
+      interview_complete:  result.interview_complete,
+      audio_analyzed:      result.audio_analyzed,
+      video_analyzed:      result.video_analyzed,
+      message:             result.message,
+    });
+
+  } catch (err) {
+    console.error('Submit answer error:', err);
+    cleanup(req.file);
+    return res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// ============================================================
+// باقي الـ Endpoints (Feedback, Status, Delete...)
+// ============================================================
+router.get('/session/:session_id/feedback', async (req, res) => {
+  try {
+    const { session_id } = req.params;
+    if (!sessions.has(session_id)) {
+      return res.status(404).json({ success: false, message: 'Session not found' });
+    }
+
+    const { python_session_id } = sessions.get(session_id);
+    const feedback = await getFinalFeedback(python_session_id);
+
+    if (!feedback) {
+      return res.status(500).json({ success: false, message: 'Could not generate feedback' });
+    }
+
+    return res.json(feedback);
+
+  } catch (err) {
+    console.error('Feedback error:', err);
+    return res.status(500).json({ success: false, message: 'Error generating feedback' });
+  }
+});
+
+router.get('/session/:session_id/status', (req, res) => {
+  const { session_id } = req.params;
+  const session = sessions.get(session_id);
+  if (!session) {
+    return res.status(404).json({ success: false, message: 'Session not found' });
+  }
+  return res.json({ success: true, session_id, status: session.status });
+});
+
+router.delete('/session/:session_id', (req, res) => {
+  const { session_id } = req.params;
+  if (sessions.has(session_id)) {
+    sessions.delete(session_id);
+  }
+  return res.json({ success: true, message: 'Session ended' });
+});
+
+router.get('/python-status', async (req, res) => {
+  const alive = await isPythonAlive();
+  return res.json({ success: true, python_ai_online: alive });
+});
+
+module.exports = router;
