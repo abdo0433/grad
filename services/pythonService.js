@@ -1,9 +1,9 @@
 // pythonService.js
-const axios    = require('axios');
+const axios = require('axios');
 const FormData = require('form-data');
-const fs       = require('fs');
+const fs = require('fs');
 
-const PYTHON_URL = 'https://4016-154-178-148-244.ngrok-free.app';
+const PYTHON_URL = process.env.PYTHON_URL || 'http://localhost:8000';
 
 // ============================================================
 // HELPER: detect real audionMIME type from file magic bytes
@@ -17,7 +17,7 @@ const PYTHON_URL = 'https://4016-154-178-148-244.ngrok-free.app';
 // the correct file extension so Python can save it with the right suffix.
 function detectAudioFormat(filePath) {
   try {
-    const fd  = fs.openSync(filePath, 'r');
+    const fd = fs.openSync(filePath, 'r');
     const buf = Buffer.alloc(16);
     fs.readSync(fd, buf, 0, 16, 0);
     fs.closeSync(fd);
@@ -32,12 +32,12 @@ function detectAudioFormat(filePath) {
     }
     // RIFF WAV
     if (buf.slice(0, 4).toString('ascii') === 'RIFF' &&
-        buf.slice(8, 12).toString('ascii') === 'WAVE') {
+      buf.slice(8, 12).toString('ascii') === 'WAVE') {
       return { mimeType: 'audio/wav', ext: '.wav' };
     }
     // MP3 — ID3 tag or sync bytes
     if (buf.slice(0, 3).toString('ascii') === 'ID3' ||
-        (buf[0] === 0xff && (buf[1] & 0xe0) === 0xe0)) {
+      (buf[0] === 0xff && (buf[1] & 0xe0) === 0xe0)) {
       return { mimeType: 'audio/mpeg', ext: '.mp3' };
     }
     // MP4 / M4A
@@ -59,12 +59,12 @@ function detectAudioFormat(filePath) {
 async function startPythonSession(jobTitle, jobDescription, cvFileBuffer, cvFileName) {
   try {
     const formData = new FormData();
-    formData.append('job_title',       jobTitle);
+    formData.append('job_title', jobTitle);
     formData.append('job_description', jobDescription);
 
     if (cvFileBuffer && cvFileName) {
       formData.append('cv_file', cvFileBuffer, {
-        filename:    cvFileName,
+        filename: cvFileName,
         contentType: 'application/pdf',
       });
     }
@@ -111,11 +111,11 @@ async function analyzeAudio(pythonSessionId, file) {
     // saves the temp file with the right suffix and Whisper can identify the format
     const correctedFilename = `audio_${Date.now()}${ext}`;
 
-    console.log(`[analyzeAudio] detected format: ${mimeType} (${ext}), size: ${(file.size/1024).toFixed(1)}KB`);
+    console.log(`[analyzeAudio] detected format: ${mimeType} (${ext}), size: ${(file.size / 1024).toFixed(1)}KB`);
 
     const formData = new FormData();
     formData.append('file', fs.createReadStream(file.path), {
-      filename:    correctedFilename,   // ← correct extension, not the fake .wav name
+      filename: correctedFilename,   // ← correct extension, not the fake .wav name
       contentType: mimeType,            // ← real MIME type, not hardcoded 'audio/wav'
     });
 
@@ -126,7 +126,7 @@ async function analyzeAudio(pythonSessionId, file) {
         headers: formData.getHeaders(),
         timeout: 60000,
         maxContentLength: Infinity,
-        maxBodyLength:    Infinity,
+        maxBodyLength: Infinity,
       }
     );
 
@@ -148,8 +148,8 @@ async function submitAnswerToPython(pythonSessionId, answerText, audioFeatures =
     const response = await axios.post(
       `${PYTHON_URL}/api/session/${pythonSessionId}/answer`,
       {
-        session_id:     pythonSessionId,
-        answer:         answerText,
+        session_id: pythonSessionId,
+        answer: answerText,
         audio_features: audioFeatures,
         video_features: videoFeatures,
       },
@@ -176,7 +176,7 @@ async function sendFrame(pythonSessionId, frameBase64) {
     const response = await axios.post(
       `${PYTHON_URL}/api/session/${pythonSessionId}/video-frame`,
       {
-        session_id:   pythonSessionId,
+        session_id: pythonSessionId,
         frame_base64: frameBase64,
       },
       {

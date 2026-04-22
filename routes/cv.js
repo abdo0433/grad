@@ -9,7 +9,7 @@ const User = require("../models/User");
 
 const upload = multer({ dest: "uploads/" });
 
-const FASTAPI_URL = "https://nasopharyngeal-sloane-justifyingly.ngrok-free.dev";
+const FASTAPI_URL = process.env.FASTAPI_URL || "http://localhost:8000";
 
 const authMiddleware = (req, res, next) => {
   const authHeader = req.header("Authorization");
