@@ -124,7 +124,7 @@ async function analyzeAudio(pythonSessionId, file) {
       formData,
       {
         headers: formData.getHeaders(),
-        timeout: 60000,
+        timeout: 120000,
         maxContentLength: Infinity,
         maxBodyLength: Infinity,
       }
