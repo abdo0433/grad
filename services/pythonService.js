@@ -3,7 +3,7 @@ const axios = require('axios');
 const FormData = require('form-data');
 const fs = require('fs');
 
-const PYTHON_URL = 'ai.messi-messi-qyvdq7-c401a0-130-162-46-17.traefik.me';
+const FASTAPI_URL = process.env.FASTAPI_URL;;
 
 // ============================================================
 // HELPER: detect real audionMIME type from file magic bytes
