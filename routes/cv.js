@@ -9,7 +9,7 @@ const User = require("../models/User");
 
 const upload = multer({ dest: "uploads/" });
 
-const FASTAPI_URL = process.env.FASTAPI_URL || "http://localhost:8000";
+const FASTAPI_URL = 'ai.messi-messi-qyvdq7-c401a0-130-162-46-17.traefik.me';
 
 const authMiddleware = (req, res, next) => {
   const authHeader = req.header("Authorization");
