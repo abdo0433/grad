@@ -3,7 +3,7 @@ const axios = require('axios');
 const FormData = require('form-data');
 const fs = require('fs');
 
-const PYTHON_URL = process.env.PYTHON_URL || 'http://localhost:8000';
+const PYTHON_URL = 'ai.messi-messi-qyvdq7-c401a0-130-162-46-17.traefik.me';
 
 // ============================================================
 // HELPER: detect real audionMIME type from file magic bytes
