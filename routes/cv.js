@@ -65,7 +65,7 @@ router.post("/upload-cv", authMiddleware, upload.single("cv"), async (req, res) 
     });
     formData.append("jd_text", jdText);
 
-    const response = await axios.post(`${FASTAPI_URL}/ats/match`, formData, {
+    const response = await axios.post(`${PYTHON_URL}/ats/match`, formData, {
       headers: {
         ...formData.getHeaders(),
       },
