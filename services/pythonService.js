@@ -3,7 +3,7 @@ const axios = require('axios');
 const FormData = require('form-data');
 const fs = require('fs');
 
-const FASTAPI_URL = process.env.FASTAPI_URL;;
+const FASTAPI_URL = process.env.FASTAPI_URL;
 
 // ============================================================
 // HELPER: detect real audionMIME type from file magic bytes
